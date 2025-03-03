@@ -3,7 +3,7 @@ package com.example.meditationapp
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
@@ -18,8 +18,17 @@ import com.example.meditationapp.ui.screens.FavoritesScreen
 import com.example.meditationapp.ui.theme.MeditationAppTheme
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import com.example.meditationapp.ui.screens.Meditation
-import kotlinx.coroutines.DisposableHandle
+import com.example.meditationapp.ui.components.PlayerBottomBar
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import android.net.Uri
+import android.content.ContentResolver
+import android.content.res.Resources
+import java.io.File
+import android.media.MediaMetadataRetriever
+import java.util.concurrent.TimeUnit
 
 sealed class Screen(val route: String, val icon: @Composable () -> Unit, val label: String) {
     object Home : Screen(
@@ -35,9 +44,78 @@ sealed class Screen(val route: String, val icon: @Composable () -> Unit, val lab
 }
 
 class MainActivity : ComponentActivity() {
+    private var exoPlayer: ExoPlayer? = null
+
+    private fun loadMeditationsFromRaw(): List<Meditation> {
+        val meditations = mutableListOf<Meditation>()
+        try {
+            // Получаем список всех raw-ресурсов через R.raw
+            val rawClass = R.raw::class.java
+            val resourceFields = rawClass.fields
+            
+            resourceFields.forEachIndexed { index, field ->
+                if (field.name != "readme") { // Пропускаем readme.md файл
+                    try {
+                        val resourceId = field.getInt(null)
+                        val resourceName = resources.getResourceEntryName(resourceId)
+                        
+                        // Получаем длительность файла
+                        val uri = Uri.parse("android.resource://${packageName}/${resourceId}")
+                        val retriever = MediaMetadataRetriever()
+                        retriever.setDataSource(this, uri)
+                        val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0
+                        val durationMinutes = TimeUnit.MILLISECONDS.toMinutes(duration)
+                        
+                        // Создаем читаемое название
+                        val title = resourceName
+                            .replace("_", " ")
+                            .split(" ")
+                            .joinToString(" ") { word ->
+                                word.capitalize()
+                            }
+
+                        // Создаем объект медитации
+                        val meditation = Meditation(
+                            id = index + 1,
+                            title = title,
+                            duration = "${durationMinutes} мин",
+                            description = "Медитация $title",
+                            audioResId = resourceId
+                        )
+                        meditations.add(meditation)
+                        
+                        retriever.release()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return meditations
+    }
+
+    private fun getMediaUri(resourceId: Int): Uri {
+        return try {
+            Uri.parse("android.resource://${packageName}/${resourceId}")
+        } catch (e: Exception) {
+            Uri.parse("android.resource://${packageName}/raw/${resources.getResourceEntryName(resourceId)}")
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        exoPlayer?.release()
+        exoPlayer = null
+    }
+
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        exoPlayer = ExoPlayer.Builder(this).build()
+
         setContent {
             MeditationAppTheme {
                 val navController = rememberNavController()
@@ -45,47 +123,88 @@ class MainActivity : ComponentActivity() {
                 var selectedScreen by remember { mutableStateOf(0) }
                 
                 var meditations by remember {
-                    mutableStateOf(
-                        listOf(
-                            Meditation(1, "Утренняя медитация", "10 мин", "Начните свой день с позитивной энергией", R.raw.morning),
-                            Meditation(2, "Медитация для сна", "15 мин", "Расслабляющая практика перед сном", R.raw.sleep),
-                            Meditation(3, "Дыхательные практики", "8 мин", "Техники глубокого дыхания для снятия стресса", R.raw.breathing)
-                        )
-                    )
+                    mutableStateOf(loadMeditationsFromRaw())
                 }
                 
                 var currentPlayingMeditation by remember { mutableStateOf<Meditation?>(null) }
                 var isPlaying by remember { mutableStateOf(false) }
-
-                val exoPlayer = remember {
-                    ExoPlayer.Builder(this).build()
-                }
+                var currentPosition by remember { mutableStateOf(0L) }
+                var duration by remember { mutableStateOf(0L) }
 
                 DisposableEffect(Unit) {
+                    val listener = object : Player.Listener {
+                        override fun onPlaybackStateChanged(playbackState: Int) {
+                            if (playbackState == Player.STATE_READY) {
+                                duration = exoPlayer?.duration ?: 0L
+                            }
+                        }
+
+                        override fun onIsPlayingChanged(isPlayingNow: Boolean) {
+                            isPlaying = isPlayingNow
+                        }
+                    }
+                    exoPlayer?.addListener(listener)
                     onDispose {
-                        exoPlayer.release()
+                        exoPlayer?.removeListener(listener)
+                    }
+                }
+
+                val scope = rememberCoroutineScope()
+
+                // Обновление позиции воспроизведения
+                LaunchedEffect(isPlaying) {
+                    while (isPlaying) {
+                        currentPosition = exoPlayer?.currentPosition ?: 0L
+                        delay(1000) // Обновляем каждую секунду
                     }
                 }
 
                 Scaffold(
                     bottomBar = {
-                        NavigationBar {
-                            screens.forEachIndexed { index, screen ->
-                                NavigationBarItem(
-                                    icon = screen.icon,
-                                    label = { Text(screen.label) },
-                                    selected = selectedScreen == index,
-                                    onClick = {
-                                        selectedScreen = index
-                                        navController.navigate(screen.route) {
-                                            popUpTo(navController.graph.startDestinationId) {
-                                                saveState = true
-                                            }
-                                            launchSingleTop = true
-                                            restoreState = true
-                                        }
+                        Column {
+                            PlayerBottomBar(
+                                currentMeditation = currentPlayingMeditation,
+                                isPlaying = isPlaying,
+                                currentPosition = currentPosition,
+                                duration = duration,
+                                onPlayPause = {
+                                    if (isPlaying) {
+                                        exoPlayer?.pause()
+                                    } else {
+                                        exoPlayer?.play()
                                     }
-                                )
+                                },
+                                onSeek = { position ->
+                                    scope.launch {
+                                        exoPlayer?.seekTo(position)
+                                        currentPosition = position
+                                    }
+                                },
+                                onClose = {
+                                    exoPlayer?.stop()
+                                    currentPlayingMeditation = null
+                                    isPlaying = false
+                                    currentPosition = 0
+                                }
+                            )
+                            NavigationBar {
+                                screens.forEachIndexed { index, screen ->
+                                    NavigationBarItem(
+                                        icon = screen.icon,
+                                        label = { Text(screen.label) },
+                                        selected = selectedScreen == index,
+                                        onClick = {
+                                            selectedScreen = index
+                                            navController.navigate(screen.route) {
+                                                popUpTo(navController.graph.startDestinationId) {
+                                                    saveState = true
+                                                }
+                                                launchSingleTop = true
+                                                restoreState = true
+                                            }
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -103,18 +222,18 @@ class MainActivity : ComponentActivity() {
                                 onPlayPause = { meditation ->
                                     if (currentPlayingMeditation?.id == meditation.id) {
                                         if (isPlaying) {
-                                            exoPlayer.pause()
+                                            exoPlayer?.pause()
                                         } else {
-                                            exoPlayer.play()
+                                            exoPlayer?.play()
                                         }
-                                        isPlaying = !isPlaying
                                     } else {
                                         currentPlayingMeditation = meditation
-                                        val mediaItem = MediaItem.fromUri("android.resource://${packageName}/${meditation.audioResId}")
-                                        exoPlayer.setMediaItem(mediaItem)
-                                        exoPlayer.prepare()
-                                        exoPlayer.play()
-                                        isPlaying = true
+                                        exoPlayer?.let { player ->
+                                            val mediaItem = MediaItem.fromUri(getMediaUri(meditation.audioResId))
+                                            player.setMediaItem(mediaItem)
+                                            player.prepare()
+                                            player.play()
+                                        }
                                     }
                                 },
                                 onToggleFavorite = { meditation ->
@@ -136,18 +255,18 @@ class MainActivity : ComponentActivity() {
                                 onPlayPause = { meditation ->
                                     if (currentPlayingMeditation?.id == meditation.id) {
                                         if (isPlaying) {
-                                            exoPlayer.pause()
+                                            exoPlayer?.pause()
                                         } else {
-                                            exoPlayer.play()
+                                            exoPlayer?.play()
                                         }
-                                        isPlaying = !isPlaying
                                     } else {
                                         currentPlayingMeditation = meditation
-                                        val mediaItem = MediaItem.fromUri("android.resource://${packageName}/${meditation.audioResId}")
-                                        exoPlayer.setMediaItem(mediaItem)
-                                        exoPlayer.prepare()
-                                        exoPlayer.play()
-                                        isPlaying = true
+                                        exoPlayer?.let { player ->
+                                            val mediaItem = MediaItem.fromUri(getMediaUri(meditation.audioResId))
+                                            player.setMediaItem(mediaItem)
+                                            player.prepare()
+                                            player.play()
+                                        }
                                     }
                                 },
                                 onToggleFavorite = { meditation ->
@@ -166,4 +285,8 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
+
+fun String.capitalize(): String {
+    return this.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
 } 
