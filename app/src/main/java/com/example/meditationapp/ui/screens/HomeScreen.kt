@@ -21,6 +21,7 @@ import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import com.example.meditationapp.R
 
 data class Meditation(
@@ -58,6 +59,7 @@ fun SearchBar(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     meditations: List<Meditation>,
@@ -79,8 +81,16 @@ fun HomeScreen(
             .padding(16.dp)
     ) {
         Text(
-            text = "Медитация и Осознанность",
+            text = "Мои медитации",
             style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        Text(
+            text = "Доступно медитаций: ${meditations.size}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 16.dp)
         )
 

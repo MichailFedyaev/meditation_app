@@ -23,6 +23,12 @@ import com.example.meditationapp.ui.screens.Meditation
 import com.example.meditationapp.ui.components.PlayerBottomBar
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.net.Uri
+import android.content.ContentResolver
+import android.content.res.Resources
+import java.io.File
+import android.media.MediaMetadataRetriever
+import java.util.concurrent.TimeUnit
 
 sealed class Screen(val route: String, val icon: @Composable () -> Unit, val label: String) {
     object Home : Screen(
@@ -39,6 +45,64 @@ sealed class Screen(val route: String, val icon: @Composable () -> Unit, val lab
 
 class MainActivity : ComponentActivity() {
     private var exoPlayer: ExoPlayer? = null
+
+    private fun loadMeditationsFromRaw(): List<Meditation> {
+        val meditations = mutableListOf<Meditation>()
+        try {
+            // Получаем список всех raw-ресурсов через R.raw
+            val rawClass = R.raw::class.java
+            val resourceFields = rawClass.fields
+            
+            resourceFields.forEachIndexed { index, field ->
+                if (field.name != "readme") { // Пропускаем readme.md файл
+                    try {
+                        val resourceId = field.getInt(null)
+                        val resourceName = resources.getResourceEntryName(resourceId)
+                        
+                        // Получаем длительность файла
+                        val uri = Uri.parse("android.resource://${packageName}/${resourceId}")
+                        val retriever = MediaMetadataRetriever()
+                        retriever.setDataSource(this, uri)
+                        val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0
+                        val durationMinutes = TimeUnit.MILLISECONDS.toMinutes(duration)
+                        
+                        // Создаем читаемое название
+                        val title = resourceName
+                            .replace("_", " ")
+                            .split(" ")
+                            .joinToString(" ") { word ->
+                                word.capitalize()
+                            }
+
+                        // Создаем объект медитации
+                        val meditation = Meditation(
+                            id = index + 1,
+                            title = title,
+                            duration = "${durationMinutes} мин",
+                            description = "Медитация $title",
+                            audioResId = resourceId
+                        )
+                        meditations.add(meditation)
+                        
+                        retriever.release()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return meditations
+    }
+
+    private fun getMediaUri(resourceId: Int): Uri {
+        return try {
+            Uri.parse("android.resource://${packageName}/${resourceId}")
+        } catch (e: Exception) {
+            Uri.parse("android.resource://${packageName}/raw/${resources.getResourceEntryName(resourceId)}")
+        }
+    }
 
     override fun onDestroy() {
         super.onDestroy()
@@ -59,13 +123,7 @@ class MainActivity : ComponentActivity() {
                 var selectedScreen by remember { mutableStateOf(0) }
                 
                 var meditations by remember {
-                    mutableStateOf(
-                        listOf(
-                            Meditation(1, "Утренняя медитация", "10 мин", "Начните свой день с позитивной энергией", R.raw.morning),
-                            Meditation(2, "Медитация для сна", "15 мин", "Расслабляющая практика перед сном", R.raw.sleep),
-                            Meditation(3, "Дыхательные практики", "8 мин", "Техники глубокого дыхания для снятия стресса", R.raw.breathing)
-                        )
-                    )
+                    mutableStateOf(loadMeditationsFromRaw())
                 }
                 
                 var currentPlayingMeditation by remember { mutableStateOf<Meditation?>(null) }
@@ -121,6 +179,12 @@ class MainActivity : ComponentActivity() {
                                         exoPlayer?.seekTo(position)
                                         currentPosition = position
                                     }
+                                },
+                                onClose = {
+                                    exoPlayer?.stop()
+                                    currentPlayingMeditation = null
+                                    isPlaying = false
+                                    currentPosition = 0
                                 }
                             )
                             NavigationBar {
@@ -165,7 +229,7 @@ class MainActivity : ComponentActivity() {
                                     } else {
                                         currentPlayingMeditation = meditation
                                         exoPlayer?.let { player ->
-                                            val mediaItem = MediaItem.fromUri("android.resource://${packageName}/${meditation.audioResId}")
+                                            val mediaItem = MediaItem.fromUri(getMediaUri(meditation.audioResId))
                                             player.setMediaItem(mediaItem)
                                             player.prepare()
                                             player.play()
@@ -198,7 +262,7 @@ class MainActivity : ComponentActivity() {
                                     } else {
                                         currentPlayingMeditation = meditation
                                         exoPlayer?.let { player ->
-                                            val mediaItem = MediaItem.fromUri("android.resource://${packageName}/${meditation.audioResId}")
+                                            val mediaItem = MediaItem.fromUri(getMediaUri(meditation.audioResId))
                                             player.setMediaItem(mediaItem)
                                             player.prepare()
                                             player.play()
@@ -221,4 +285,8 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
+
+fun String.capitalize(): String {
+    return this.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
 } 

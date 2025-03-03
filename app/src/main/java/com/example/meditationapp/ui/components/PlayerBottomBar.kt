@@ -9,6 +9,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Close
 import com.example.meditationapp.ui.screens.Meditation
 import androidx.compose.ui.text.style.TextOverflow
 import kotlin.time.Duration.Companion.milliseconds
@@ -21,28 +22,47 @@ fun PlayerBottomBar(
     duration: Long,
     onPlayPause: () -> Unit,
     onSeek: (Long) -> Unit,
+    onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (currentMeditation != null) {
-        Surface(
+        NavigationBar(
             modifier = modifier
                 .fillMaxWidth()
                 .height(120.dp),
-            tonalElevation = 8.dp
+            tonalElevation = 0.dp
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                // Название медитации
-                Text(
-                    text = currentMeditation.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
+                // Название медитации и кнопка закрытия
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = currentMeditation.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 8.dp)
+                    )
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Закрыть",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
 
                 // Временная шкала
                 Row(
